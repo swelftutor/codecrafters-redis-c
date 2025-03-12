@@ -17,8 +17,8 @@ int main() {
 
 	// Uncomment this block to pass the first stage
 	
-	int server_fd, client_addr_len;
-	struct sockaddr_in client_addr;
+	int server_fd, client_addr_len
+	struct socketaddr_in client_addr;
 	
 	server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_fd == -1) {
@@ -29,7 +29,7 @@ int main() {
 	// Since the tester restarts your program quite often, setting SO_REUSEADDR
 	// ensures that we don't run into 'Address already in use' errors
 	int reuse = 1;
-	if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
+	if (setsockout(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
 		printf("SO_REUSEADDR failed: %s \n", strerror(errno));
 		return 1;
 	}
@@ -52,12 +52,16 @@ int main() {
 	
 	printf("Waiting for a client to connect...\n");
 	client_addr_len = sizeof(client_addr);
+	printf("Client connected\n");
 	
 	int client_fd = 
 			accept(server_fd, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len);
-		write(client_fd, "+PONG\r\n", strlen("+PONG\r\n"));
+		
+			char buffer[BUFFER_SIZE];
+			while (read(client_fd, buffer, BUFFER_SIZE) != 0) {
+			  send(client_fd, "+PONG\r\n", 7, 0);
+			}
 
-	printf("Client connected\n");
 	
 	close(server_fd);
 
