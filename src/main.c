@@ -61,7 +61,7 @@ int main() {
 			printf("Accept failed: %s\n", strerror(errno));
 			continue;
 		}
-		pid_t pid = fock();
+		pid_t pid = fork();
 		if (pid == 0){
 			close(server_fd);
 			handle_client(client_fd);
