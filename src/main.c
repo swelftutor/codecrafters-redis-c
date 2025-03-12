@@ -61,6 +61,15 @@ int main() {
 			printf("Accept failed: %s\n", strerror(errno));
 			continue;
 		}
+		pid_t pid = fock();
+		if (pid == 0){
+			close(server_fd);
+			handle_client(client_fd);
+			close(client_fd);
+			exit(0);
+		} else {
+			close(client_fd);
+		}
         printf("Client connected\n");
 
         char buffer[BUFFER_SIZE];
