@@ -1,99 +1,122 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h> // For inet_ntoa (optional, for printing IP addresses)
+#include <sys/wait.h>   // For waitpid()
 
 #define BUFFER_SIZE 1024
+#define PORT 6379
+
+// Function to handle communication with a single client
+void handle_client(int client_fd) {
+    char buffer[BUFFER_SIZE];
+    ssize_t bytes_read;
+
+    while ((bytes_read = read(client_fd, buffer, BUFFER_SIZE)) > 0) {
+        // Respond with "+PONG\r\n"
+        if (send(client_fd, "+PONG\r\n", 7, 0) == -1) {
+            perror("send failed");
+            break; // Exit the loop on send failure
+        }
+    }
+
+    if (bytes_read == -1) {
+        perror("read failed"); // Use perror for more informative error messages
+    }
+
+    // The client has disconnected (or an error occurred)
+    // No need to explicitly close client_fd here; it's done in the main loop
+}
+
+// Signal handler for SIGCHLD to prevent zombie processes
+void sigchld_handler(int sig) {
+    while (waitpid(-1, NULL, WNOHANG) > 0);
+}
 
 int main() {
-    // Disable output buffering
-    setbuf(stdout, NULL);
+    setbuf(stdout, NULL); // Disable buffering
     setbuf(stderr, NULL);
 
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    printf("Logs from your program will appear here!\n");
+    int server_fd, client_fd;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_addr_len;
 
-    // Uncomment this block to pass the first stage
-
-    int server_fd, client_fd, client_addr_len;
-    struct sockaddr_in client_addr;
-
+    // Create socket
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
-        printf("Socket creation failed: %s...\n", strerror(errno));
-        return 1;
+        perror("socket creation failed");
+        exit(EXIT_FAILURE);
     }
 
-    // Since the tester restarts your program quite often, setting SO_REUSEADDR
-    // ensures that we don't run into 'Address already in use' errors
+    // Set SO_REUSEADDR
     int reuse = 1;
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-        printf("SO_REUSEADDR failed: %s \n", strerror(errno));
-        return 1;
+        perror("setsockopt(SO_REUSEADDR) failed");
+        exit(EXIT_FAILURE);
     }
 
-    struct sockaddr_in serv_addr = { .sin_family = AF_INET ,
-                                     .sin_port = htons(6379),
-                                     .sin_addr = { htonl(INADDR_ANY) },
-                                   };
+    // Prepare the server address structure
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(PORT);
 
-    if (bind(server_fd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) != 0) {
-        printf("Bind failed: %s \n", strerror(errno));
-        return 1;
+    // Bind the socket
+    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) != 0) {
+        perror("bind failed");
+        exit(EXIT_FAILURE);
     }
 
-    int connection_backlog = 5;
-    if (listen(server_fd, connection_backlog) != 0) {
-        printf("Listen failed: %s \n", strerror(errno));
-        return 1;
+    // Listen for connections
+    if (listen(server_fd, 5) != 0) {
+        perror("listen failed");
+        exit(EXIT_FAILURE);
     }
 
-    printf("Waiting for a client to connect...\n");
-    client_addr_len = sizeof(client_addr);
-	
-	while(1) {
-        client_fd = accept(server_fd, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len);
-		if (client_fd == -1) {
-			printf("Accept failed: %s\n", strerror(errno));
-			continue;
-		}
-		pid_t pid = fork();
-		if (pid == 0){
-			close(server_fd);
-			handle_client(client_fd);
-			close(client_fd);
-			exit(0);
-		} else {
-			close(client_fd);
-		}
-        printf("Client connected\n");
+    printf("Server listening on port %d\n", PORT);
 
-        char buffer[BUFFER_SIZE];
-        ssize_t bytes_read;
-		
-        while ((bytes_read = read(client_fd, buffer, BUFFER_SIZE)) > 0) {
-          //  buffer[bytes_read] = '\0';  // Null-terminate the buffer
-          //  printf("Received: %s\n", buffer);
+	// Install signal handler for SIGCHLD
+    struct sigaction sa;
+    sa.sa_handler = sigchld_handler; // reap all dead processes
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+    if (sigaction(SIGCHLD, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(1);
+    }
 
-            // Respond with "+PONG\r\n"
-             if (send(client_fd, "+PONG\r\n", 7, 0) == -1)
-             {
-                perror("send failed");
-                break;
-             }
+    // Main server loop
+    while (1) {
+        client_addr_len = sizeof(client_addr);
+        client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+        if (client_fd == -1) {
+            perror("accept failed");
+            continue; // Go back to the beginning of the loop
         }
 
-        if (bytes_read == -1) {
-            printf("Read failed: %s\n", strerror(errno));
+        // Print client information (optional, but helpful for debugging)
+        printf("Client connected: %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+
+        pid_t pid = fork();
+        if (pid == -1) {
+            perror("fork failed");
+            close(client_fd); // Close the client socket in the parent
+            continue;
         }
-        close(client_fd);
-	}
 
-    close(server_fd);
+        if (pid == 0) { // Child process
+            close(server_fd); // Close the listening socket in the child
+            handle_client(client_fd);
+            close(client_fd); // Close the client socket in the child
+            exit(EXIT_SUCCESS); // Exit the child process cleanly
+        } else { // Parent process
+            close(client_fd); // Close the client socket in the parent
+        }
+    }
 
+    close(server_fd); // Close the server socket (this will only be reached if the loop breaks)
     return 0;
 }
